@@ -14,5 +14,5 @@ ENV BOTS_API_URL=http://localhost:8080
 ENV PYTHONUNBUFFERED=1
 
 # Run the MCP server
-ENTRYPOINT ["python", "-m", "main"]
+ENTRYPOINT ["python", "-m", "src.main"]
 CMD []
