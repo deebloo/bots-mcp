@@ -8,6 +8,7 @@ Configuration (environment variables):
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -187,5 +188,18 @@ async def health_check(access_token: str) -> dict[str, Any]:
         return r.json()
 
 
+def main():
+    """Entry point for the bots-mcp command."""
+    port = int(os.getenv("MCP_SERVER_PORT", "8000"))
+    host = os.getenv("MCP_SERVER_HOST", "127.0.0.1")
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "stdio":
+        # Support stdio transport if explicitly requested
+        mcp.run()
+    else:
+        # Run as HTTP server (SSE transport)
+        mcp.run(transport="sse", host=host, port=port)
+
+
 if __name__ == "__main__":
-    mcp.run()
+    main()
