@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml README.md ./
-COPY main.py ./
+COPY src src
 
 # Install dependencies
 RUN pip install --no-cache-dir -e .
