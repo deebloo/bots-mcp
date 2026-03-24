@@ -14,10 +14,28 @@ from typing import Any, Literal, cast
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import CurrentHeaders
+from fastmcp.exceptions import AuthorizationError
 
 mcp = FastMCP("BOTS API")
 
 BOTS_API_URL = os.getenv("BOTS_API_URL", "http://localhost:8080").rstrip("/")
+
+
+def _require_bearer_token(headers: dict[str, str] | None) -> str:
+    if not headers:
+        raise AuthorizationError("401 Unauthorized: missing or invalid Authorization header")
+
+    authorization = headers.get("authorization") or headers.get("Authorization")
+    if not authorization:
+        raise AuthorizationError("401 Unauthorized: missing or invalid Authorization header")
+
+    scheme, _, token = authorization.partition(" ")
+    
+    if scheme.lower() != "bearer" or not token:
+        raise AuthorizationError("401 Unauthorized: missing or invalid Authorization header")
+
+    return token.strip()
 
 def _headers(access_token: str | None = None) -> dict[str, str]:
     headers: dict[str, str] = {}
@@ -41,28 +59,37 @@ def _normalize_lang_code(lang_code: str) -> str:
     return normalized
 
 @mcp.tool
-async def list_translations(access_token: str) -> list[dict[str, Any]]:
+async def list_translations(
+    current_headers: dict[str, str] = CurrentHeaders(),
+) -> list[dict[str, Any]]:
     """Return the full translation history for the configured user.
     
     Args:
-        access_token: Bearer token for API authentication.
+        current_headers: Current HTTP request headers.
     """
-    
-    async with _client(access_token) as client:
+
+    resolved_access_token = _require_bearer_token(current_headers)
+
+    async with _client(resolved_access_token) as client:
         r = await client.get("/api/v1/translations")
         r.raise_for_status()
         return r.json()
 
 
 @mcp.tool
-async def get_translation(id: str, access_token: str) -> dict[str, Any]:
+async def get_translation(
+    id: str,
+    current_headers: dict[str, str] = CurrentHeaders(),
+) -> dict[str, Any]:
     """Get a single translation by its UUID.
 
     Args:
         id: Translation UUID.
-        access_token: Bearer token for API authentication.
+        current_headers: Current HTTP request headers.
     """
-    async with _client(access_token) as client:
+    resolved_access_token = _require_bearer_token(current_headers)
+
+    async with _client(resolved_access_token) as client:
         r = await client.get(f"/api/v1/translations/{id}")
         r.raise_for_status()
         return r.json()
@@ -73,7 +100,7 @@ async def create_text_translation(
     source_lang: str,
     target_lang: str,
     source_content: str,
-    access_token: str,
+    current_headers: dict[str, str] = CurrentHeaders(),
     labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a new text translation.
@@ -82,7 +109,7 @@ async def create_text_translation(
         source_lang: 2-letter source language code, e.g. "en".
         target_lang: 2-letter target language code, e.g. "fr".
         source_content: The plain text to translate.
-        access_token: Bearer token for API authentication.
+        current_headers: Current HTTP request headers.
         labels: Optional list of label IDs to attach to this translation.
     """
     source_lang = _normalize_lang_code(source_lang)
@@ -97,7 +124,9 @@ async def create_text_translation(
     for label in labels or []:
         data.append(("labels", label))
 
-    async with _client(access_token) as client:
+    resolved_access_token = _require_bearer_token(current_headers)
+
+    async with _client(resolved_access_token) as client:
         r = await client.post("/api/v1/translations", data=cast(Any, data))
         r.raise_for_status()
         return r.json()
@@ -108,7 +137,7 @@ async def create_file_translation(
     source_lang: str,
     target_lang: str,
     file_path: str,
-    access_token: str,
+    current_headers: dict[str, str] = CurrentHeaders(),
     labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a new file translation by uploading a local file.
@@ -117,7 +146,7 @@ async def create_file_translation(
         source_lang: 2-letter source language code, e.g. "en".
         target_lang: 2-letter target language code, e.g. "fr".
         file_path: Absolute or relative path to the file to translate (docx, pdf, image, etc.).
-        access_token: Bearer token for API authentication.
+        current_headers: Current HTTP request headers.
         labels: Optional list of label IDs to attach to this translation.
     """
     source_lang = _normalize_lang_code(source_lang)
@@ -135,8 +164,10 @@ async def create_file_translation(
     for label in labels or []:
         data.append(("labels", label))
 
+    resolved_access_token = _require_bearer_token(current_headers)
+
     with path.open("rb") as fh:
-        async with _client(access_token) as client:
+        async with _client(resolved_access_token) as client:
             r = await client.post(
                 "/api/v1/translations",
                 data=cast(Any, data),
@@ -150,7 +181,7 @@ async def download_translation_file(
     id: str,
     file_type: Literal["source", "target"],
     save_to: str,
-    access_token: str,
+    current_headers: dict[str, str] = CurrentHeaders(),
 ) -> str:
     """Download a translation's source or target file and save it locally.
 
@@ -158,31 +189,32 @@ async def download_translation_file(
         id: Translation UUID.
         file_type: Whether to download the "source" or "target" file.
         save_to: Local path where the downloaded file should be saved.
-        access_token: Bearer token for API authentication.
+        current_headers: Current HTTP request headers.
     """
     save_path = Path(save_to).expanduser().resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async with _client(access_token) as client:
+    resolved_access_token = _require_bearer_token(current_headers)
+
+    async with _client(resolved_access_token) as client:
         r = await client.get(f"/api/v1/translations/{id}/files/{file_type}")
         r.raise_for_status()
         save_path.write_bytes(r.content)
 
     return f"File saved to {save_path}"
 
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
-
-
 @mcp.tool
-async def health_check(access_token: str) -> dict[str, Any]:
+async def health_check(
+    current_headers: dict[str, str] = CurrentHeaders(),
+) -> dict[str, Any]:
     """Check whether the BOTS API is reachable and healthy.
     
     Args:
-        access_token: Bearer token for API authentication.
+        current_headers: Current HTTP request headers.
     """
-    async with _client(access_token) as client:
+    resolved_access_token = _require_bearer_token(current_headers)
+
+    async with _client(resolved_access_token) as client:
         r = await client.get("/health")
         r.raise_for_status()
         return r.json()
