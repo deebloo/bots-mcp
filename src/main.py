@@ -4,7 +4,14 @@ BOTS MCP Server
 Exposes the BOTS translate-api as MCP tools.
 
 Configuration (environment variables):
-  BOTS_API_URL - Base URL of the translate-api (default: http://localhost:8080)
+    BOTS_API_URL - Base URL of the translate-api (default: http://localhost:8080)
+    BOTS_MCP_OAUTH_ISSUER - Issuer URL returned by OAuth discovery metadata.
+    BOTS_MCP_OAUTH_AUTHORIZATION_ENDPOINT - Authorization endpoint returned by OAuth discovery metadata.
+    BOTS_MCP_OAUTH_TOKEN_ENDPOINT - Token endpoint returned by OAuth discovery metadata.
+    BOTS_MCP_OAUTH_REGISTRATION_ENDPOINT - Optional client registration endpoint returned by OAuth discovery metadata.
+    BOTS_MCP_OAUTH_SCOPES_SUPPORTED - Comma-separated scopes returned by OAuth discovery metadata.
+    BOTS_MCP_SERVER_HOST - Interface address for the HTTP/SSE server (default: 127.0.0.1).
+    BOTS_MCP_SERVER_PORT - Port for the HTTP/SSE server (default: 8000).
 """
 
 import os
@@ -14,19 +21,63 @@ from typing import Any, Literal, cast
 
 import httpx
 from fastmcp import FastMCP
+from fastapi import FastAPI, Request
 from fastmcp.server.dependencies import CurrentHeaders
 from fastmcp.exceptions import AuthorizationError
 
-mcp = FastMCP("BOTS API")
+app = FastAPI()
+mcp = FastMCP.from_fastapi(app)
 
 BOTS_API_URL = os.getenv("BOTS_API_URL", "http://localhost:8080").rstrip("/")
+BOTS_MCP_OAUTH_ISSUER = os.getenv("BOTS_MCP_OAUTH_ISSUER", "").rstrip("/")
+BOTS_MCP_OAUTH_AUTHORIZATION_ENDPOINT = os.getenv("BOTS_MCP_OAUTH_AUTHORIZATION_ENDPOINT", "").rstrip("/")
+BOTS_MCP_OAUTH_TOKEN_ENDPOINT = os.getenv("BOTS_MCP_OAUTH_TOKEN_ENDPOINT", "").rstrip("/")
+BOTS_MCP_OAUTH_REGISTRATION_ENDPOINT = os.getenv("BOTS_MCP_OAUTH_REGISTRATION_ENDPOINT", "").rstrip("/")
+BOTS_MCP_OAUTH_SCOPES_SUPPORTED = [
+    scope.strip()
+    for scope in os.getenv("BOTS_MCP_OAUTH_SCOPES_SUPPORTED", "mcp:tools:call").split(",")
+    if scope.strip()
+]
 
+
+def _public_base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
+def _oauth_metadata(request: Request) -> dict[str, Any]:
+    base_url = _public_base_url(request)
+
+    metadata: dict[str, Any] = {
+        "issuer": BOTS_MCP_OAUTH_ISSUER or base_url,
+        "authorization_endpoint": BOTS_MCP_OAUTH_AUTHORIZATION_ENDPOINT or f"{base_url}/oauth/authorize",
+        "token_endpoint": BOTS_MCP_OAUTH_TOKEN_ENDPOINT or f"{base_url}/oauth/token",
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "response_types_supported": ["code"],
+        "scopes_supported": BOTS_MCP_OAUTH_SCOPES_SUPPORTED,
+        "code_challenge_methods_supported": ["S256"],
+    }
+
+    if BOTS_MCP_OAUTH_REGISTRATION_ENDPOINT:
+        metadata["registration_endpoint"] = BOTS_MCP_OAUTH_REGISTRATION_ENDPOINT
+
+    return metadata
+
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server_metadata(request: Request) -> dict[str, Any]:
+    return _oauth_metadata(request)
+
+
+@app.get("/.well-known/openid-configuration")
+async def openid_configuration_metadata(request: Request) -> dict[str, Any]:
+    return _oauth_metadata(request)
 
 def _require_bearer_token(headers: dict[str, str] | None) -> str:
     if not headers:
         raise AuthorizationError("401 Unauthorized: missing or invalid Authorization header")
 
     authorization = headers.get("authorization") or headers.get("Authorization")
+
     if not authorization:
         raise AuthorizationError("401 Unauthorized: missing or invalid Authorization header")
 
@@ -222,8 +273,8 @@ async def health_check(
 
 def main():
     """Entry point for the bots-mcp command."""
-    port = int(os.getenv("MCP_SERVER_PORT", "8000"))
-    host = os.getenv("MCP_SERVER_HOST", "127.0.0.1")
+    port = int(os.getenv("BOTS_MCP_SERVER_PORT", "8000"))
+    host = os.getenv("BOTS_MCP_SERVER_HOST", "127.0.0.1")
     
     if len(sys.argv) > 1 and sys.argv[1] == "stdio":
         # Support stdio transport if explicitly requested
