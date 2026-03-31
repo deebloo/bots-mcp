@@ -20,7 +20,7 @@ def build_oauth_metadata(request: Request) -> dict[str, Any]:
 
     metadata: dict[str, Any] = {
         "issuer": BOTS_MCP_OAUTH_ISSUER or base_url,
-        "authorization_endpoint": BOTS_MCP_OAUTH_AUTHORIZATION_ENDPOINT or f"{base_url}/oauth/authorize",
+        "authorization_endpoint": BOTS_MCP_OAUTH_AUTHORIZATION_ENDPOINT or f"https://bots.noctuatech.com?gcp-iap-mode=FORCE_LOGIN",
         "token_endpoint": BOTS_MCP_OAUTH_TOKEN_ENDPOINT or f"{base_url}/oauth/token",
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
